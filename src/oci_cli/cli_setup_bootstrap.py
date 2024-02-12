@@ -5,6 +5,7 @@
 from __future__ import print_function
 from oci_cli import cli_setup
 from oci_cli import cli_util
+from oci_cli import cli_constants
 
 from oci_cli.cli_setup import DEFAULT_KEY_NAME, PUBLIC_KEY_FILENAME_SUFFIX, PRIVATE_KEY_FILENAME_SUFFIX
 from oci_cli.cli_setup import prompt_for_passphrase
@@ -24,7 +25,7 @@ from oci import identity
 from urllib.parse import urlparse, parse_qs, urlencode
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-BOOTSTRAP_SERVICE_PORT = 8181
+DEFAULT_BOOTSTRAP_SERVICE_PORT = 8181
 BOOTSTRAP_PROCESS_CANCELED_MESSAGE = 'Bootstrap process canceled.'
 CONSOLE_AUTH_URL_FORMAT = "https://login.{region}.{realm}/v1/oauth2/authorize"
 
@@ -33,15 +34,30 @@ CONSOLE_AUTH_URL_FORMAT = "https://login.{region}.{realm}/v1/oauth2/authorize"
 Provides an interactive process to create a CLI config file using username / password based login through a browser.
 Also handles generating API keys and uploading them to your Oracle Cloud Infrastructure account.
 
-Note that port {port} must be available in order for this command to complete properly.""".format(port=BOOTSTRAP_SERVICE_PORT))
+Use --bootstrap-port or set an OCI_CLI_BOOTSTRAP_PORT environment variable to override the default port assignment of {port} .
+The bootstrap port must be available for this command to complete successfully.""".format(port=DEFAULT_BOOTSTRAP_SERVICE_PORT))
+
 @click.option('--profile-name', help='Name of the profile you are creating')
 @click.option('--config-location', help='Path to the config for the new profile')
+@click.option('--bootstrap-port', default=DEFAULT_BOOTSTRAP_SERVICE_PORT, show_default=True, help='Port to use for the bootstrap process.')
 @cli_util.help_option
 @click.pass_context
 @cli_util.wrap_exceptions
-def bootstrap_oci_cli(ctx, profile_name, config_location):
+def bootstrap_oci_cli(ctx, profile_name, config_location, bootstrap_port=DEFAULT_BOOTSTRAP_SERVICE_PORT):
     region_param = ctx.obj['region'] if ctx.obj['region'] else ''
-    user_session = create_user_session(region=region_param)
+
+    try:
+        bootstrap_port = int(os.environ.get(cli_constants.OCI_CLI_BOOTSTRAP_PORT_ENV_VAR, bootstrap_port))
+
+        if not 1024 <= bootstrap_port <= 65535:
+            click.echo('Bootstrap port must be between 1024 and 65535.')
+            sys.exit(1)
+
+    except ValueError:
+        click.echo('Bootstrap port must be numeric.')
+        sys.exit(1)
+
+    user_session = create_user_session(region=region_param, bootstrap_port=bootstrap_port)
 
     public_key = user_session.public_key
     private_key = user_session.private_key
@@ -110,19 +126,17 @@ def bootstrap_oci_cli(ctx, profile_name, config_location):
 """.format(config_file=config_location, profile=profile_name))
 
 
-def create_user_session(region='', tenancy_name=None):
+def create_user_session(region='', bootstrap_port=DEFAULT_BOOTSTRAP_SERVICE_PORT, tenancy_name=None):
     if region == '':
         region = cli_setup.prompt_for_region()
 
     # try to set up http server so we can fail early if the required port is in use
     try:
-        server_address = ('', BOOTSTRAP_SERVICE_PORT)
+        server_address = ('', bootstrap_port)
         httpd = StoppableHttpServer(server_address, StoppableHttpRequestHandler)
     except OSError as e:
         if e.errno == errno.EADDRINUSE:
-            click.echo("Could not complete bootstrap process because port {port} is already in use.".format(
-                port=BOOTSTRAP_SERVICE_PORT)
-            )
+            click.echo("Could not complete bootstrap process because port {bootstrap_port} is already in use.".format(bootstrap_port))
 
             sys.exit(1)
 
@@ -148,7 +162,7 @@ def create_user_session(region='', tenancy_name=None):
         'nonce': uuid.uuid4(),
         'scope': 'openid',
         'public_key': public_key_jwk,
-        'redirect_uri': 'http://localhost:{}'.format(BOOTSTRAP_SERVICE_PORT)
+        'redirect_uri': 'http://localhost:{}'.format(bootstrap_port)
     }
 
     if tenancy_name:

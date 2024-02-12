@@ -46,10 +46,11 @@ def session_group():
 @click.option('--profile-name', help='Name of the profile you are creating')
 @click.option('--config-location', help='Path to the config for the new session')
 @click.option('--use-passphrase', is_flag=True, help='Provide a passphrase to be used to encrypt the private key from the generated key pair')
+@click.option('--local-port', default=cli_setup_bootstrap.DEFAULT_BOOTSTRAP_SERVICE_PORT, show_default=True, help='Local port to use to complete the browser based login flow.')
 @cli_util.help_option
 @click.pass_context
 @cli_util.wrap_exceptions
-def authenticate(ctx, region, tenancy_name, profile_name, config_location, use_passphrase, no_browser, public_key_file_path, session_expiration_in_minutes, token_location):
+def authenticate(ctx, region, tenancy_name, profile_name, config_location, use_passphrase, no_browser, public_key_file_path, session_expiration_in_minutes, token_location, local_port):
     region = ctx.obj['region']
     if region is None:
         region = cli_setup.prompt_for_region()
@@ -104,7 +105,7 @@ def authenticate(ctx, region, tenancy_name, profile_name, config_location, use_p
         user_session = cli_setup_bootstrap.UserSession(user_ocid, tenancy_ocid, region, token, public_key, private_key, fingerprint)
     else:
         # create a user session through the browser login flow
-        user_session = cli_setup_bootstrap.create_user_session(region, tenancy_name)
+        user_session = cli_setup_bootstrap.create_user_session(region, local_port, tenancy_name)
 
     # persist the session to a config (including the token value)
     profile, config = cli_setup_bootstrap.persist_user_session(user_session, profile_name=profile_name, config=config_location, use_passphrase=use_passphrase, persist_token=True, session_auth=True, persist_only_public_key=persist_only_public_key)
